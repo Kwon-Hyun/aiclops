@@ -1,0 +1,114 @@
+#! 1. Image Augmentation
+import cv2 as cv
+import numpy as np
+import os
+import glob
+import albumentations as albu
+
+# Augmentation pipeline 정의 (회전, 뒤집기, 기울기 등 적용)
+# 여기서 밝기, 색조 등 색에 영향을 끼칠 만한 요소는 제외하고 augmentation 진행
+
+augmentation_pipeline = albu.Compose([
+    albu.HorizontalFlip(p=0.5), # 50% 확률로 좌우 반전
+    albu.RandomRotate90(p=0.5), # 90도 회전
+    albu.ShiftScaleRotate(shift_limit=0.0625, scale_limit=0.1, rotate_limit=45, p=0.5), # 이미지 이동, 크기 조절, 회전
+    albu.GaussNoise(p=0.2)  # 가우시안 노이즈 추가
+])
+
+def augment_images(image_set, output_path, num_augmented):
+    # 출력할 img folder가 없으면 생성~
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+    
+    for i, img_path in enumerate(image_set):
+        # 이미지 불러오기
+        img = cv.imread(img_path)   #! img_path가 어딨농?
+
+        if img is None:
+            print(f"이미지 불러오기 실패!!! : {img_path}")
+            continue
+        
+        for j in range(num_augmented):
+            # augmentation 적용
+            augmented = augmentation_pipeline(image=img)
+            augmented_img = augmented['image']
+
+            # 증강된 이미지 저장 경로 설정 및 저장
+            output_file = os.path.join(output_path, f"augmented_{i}_{j}.jpg")
+            cv.imwrite(output_file, augmented_img)
+
+# image set augmentation
+# 증강할 이미지 폴더 경로 설정
+image_folder = '/Users/hyunowk/Downloads/aiclopse_hyun/img/*'
+
+# glob을 이용해 이미지 경로 리스트 생성
+image_paths = glob.glob(image_folder)
+# image_folder 내 이미지들 각각 10번씩 증강하여 저장
+augment_images(image_paths, 'output_folder', 10)
+
+
+#! 2. 이미지 전처리 (Grayscale 및 mask 추출)
+def process_images(input_folder):
+    images = os.listdir(input_folder)
+
+    for img_file in images:
+        img_path = os.path.join(input_folder, img_file)
+        img = cv.imread(img_path)
+
+        # 1. HSV 변환
+        img_hsv = cv.cvtColor(img, cv.COLOR_BGR2HSV)
+
+        # 2. 보라색 범위 설정 (이전에 구해 놓은 범위와 다르게 다시 재설정)
+        lower_purple = np.array([125, 50, 50])
+        upper_purple = np.array([150, 255, 255])
+
+        # 3. 보라색 mask 생성
+        purple_mask = cv.inRange(img_hsv, lower_purple, upper_purple)
+
+        # 4. 흑백 변환 (보라색 Mask 적용 후)
+        img_gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+        
+        # 5. mask 적용된 흑백 이미지 저장
+        processed_img_path = os.path.join("processed_images", img_file)
+        cv.imwrite(processed_img_path, img_gray)
+
+        # 6. 보라색 mask 값 저장
+        mask_img_path = os.path.join("mask_images", img_file)
+        cv.imwrite(mask_img_path, purple_mask)
+
+# 증강된 이미지들 폴더 경로에서 처리
+process_images('output_folder')
+
+#! 3. Threshold 및 Training 적용
+# 이미지의 최적의 threshold 값을 찾는 함수
+def find_threshold(mask_images):
+    thresholds = []
+    
+    for mask_img in mask_images:
+        if mask_img is None:
+            print("이미지를 불러올 수 없습니다.")
+            continue
+        
+        # 적절한 threshold 값 찾기 (여기서는 간단하게 Otsu 방식 사용)
+        _, threshold = cv.threshold(mask_img, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
+        thresholds.append(threshold)
+    
+    if len(thresholds) == 0:
+        print("유효한 이미지를 찾지 못했습니다.")
+        return None
+
+    # 전체 이미지의 평균 threshold값 구하기
+    best_threshold = np.mean(thresholds)  # 평균 계산
+    return best_threshold
+
+# mask 이미지 경로들
+mask_images = [cv.imread('mask1.jpg', cv.IMREAD_GRAYSCALE), 
+               cv.imread('mask2.jpg', cv.IMREAD_GRAYSCALE)]
+
+# 최적 threshold 값 찾기
+best_threshold = find_threshold(mask_images)
+
+if best_threshold is not None:
+    print("Best threshold: ", best_threshold)
+else:
+    print("Threshold 값을 계산할 수 없습니다.")
